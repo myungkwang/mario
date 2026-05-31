@@ -192,6 +192,8 @@ def main():
             writer.add_scalar("episode/reward", episode_reward, episode)
             writer.add_scalar("episode/raw_reward", episode_raw_reward, episode)
             writer.add_scalar("episode/x_pos", info.get("x_pos", 0), episode)
+            writer.add_scalar("episode/flag_get", int(info.get("flag_get", False)), episode)
+            writer.add_scalar("episode/life", info.get("life", 0), episode)
 
             # 새 게임을 시작한다.
             state = env.reset()

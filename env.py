@@ -105,7 +105,7 @@ class MarioPreprocessWrapper(gym.Wrapper):
         flag_get = bool(info.get("flag_get", False))
 
         progress = max(0, x_pos - self.last_x_pos)
-        reward = raw_reward + progress * 0.5
+        reward = raw_reward + progress * 0.1
 
         if progress == 0:
             reward -= 0.2
