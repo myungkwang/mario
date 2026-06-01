@@ -1,4 +1,5 @@
 from pathlib import Path
+import argparse
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -11,6 +12,39 @@ from replay_buffer import ReplayBuffer
 
 CHECKPOINT_DIR = Path("checkpoints")
 LATEST_PATH = CHECKPOINT_DIR / "latest.pt"
+
+
+def default_checkpoint_path(stage: str) -> Path:
+    if stage == "1-1":
+        return LATEST_PATH
+    return CHECKPOINT_DIR / f"{stage}_latest.pt"
+
+
+def default_log_dir(stage: str) -> str:
+    if stage == "1-1":
+        return "runs/mario_dqn"
+    return f"runs/mario_dqn_{stage}"
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="Train Mario DQN on one stage.")
+    parser.add_argument("--stage", default="1-1", help="Mario stage to train, e.g. 1-1 or 1-2")
+    parser.add_argument(
+        "--checkpoint",
+        default=None,
+        help="Checkpoint to resume/save. Default: checkpoints/latest.pt for 1-1, checkpoints/<stage>_latest.pt otherwise.",
+    )
+    parser.add_argument(
+        "--init-from",
+        default=None,
+        help="Checkpoint to copy model weights from when --checkpoint does not exist yet.",
+    )
+    parser.add_argument(
+        "--log-dir",
+        default=None,
+        help="TensorBoard log directory. Default: runs/mario_dqn for 1-1, runs/mario_dqn_<stage> otherwise.",
+    )
+    return parser.parse_args(argv)
 
 
 def epsilon_by_step(step: int, start: float = 1.0, end: float = 0.05, decay_steps: int = 1_000_000) -> float:
@@ -88,14 +122,25 @@ def load_checkpoint_if_exists(
     return step, episode, True
 
 
-def main():
+def load_weights_from_checkpoint(path: Path, agent: DQNAgent, device: torch.device) -> None:
+    checkpoint = torch.load(path, map_location=device)
+    agent.online_net.load_state_dict(checkpoint["online_net"])
+    agent.target_net.load_state_dict(checkpoint["target_net"])
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    checkpoint_path = Path(args.checkpoint) if args.checkpoint else default_checkpoint_path(args.stage)
+    init_from_path = Path(args.init_from) if args.init_from else None
+    log_dir = args.log_dir or default_log_dir(args.stage)
+
     # CUDA GPU가 있으면 GPU로 학습한다.
     # GPU가 없으면 CPU로도 실행되지만 훨씬 느리다.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # 마리오 게임 환경을 만든다.
     # env는 AI가 행동을 넣으면 다음 화면과 점수를 돌려주는 게임 기계다.
-    env = make_env()
+    env = make_env(stage=args.stage)
 
     # 환경이 가진 행동 개수를 읽는다.
     # RIGHT_ONLY면 보통 5개 행동이 있다.
@@ -120,7 +165,7 @@ def main():
 
     # TensorBoard에 reward/loss 같은 기록을 남긴다.
     # 나중에 그래프로 학습이 좋아지는지 볼 수 있다.
-    writer = SummaryWriter(log_dir="runs/mario_dqn")
+    writer = SummaryWriter(log_dir=log_dir)
 
     # 이번 실행에서 추가로 공부할 step 수다.
     # 예전에는 total_steps가 "처음부터 끝까지 100만 step"이라는 뜻이었다.
@@ -149,12 +194,16 @@ def main():
 
     # 저장된 모델이 있으면 이어서 학습한다.
     # 없으면 start_step=0, episode=0이므로 처음부터 학습한다.
-    start_step, episode, resumed = load_checkpoint_if_exists(LATEST_PATH, agent, optimizer, device)
+    start_step, episode, resumed = load_checkpoint_if_exists(checkpoint_path, agent, optimizer, device)
 
     if resumed:
-        print(f"resumed {LATEST_PATH} step={start_step} episode={episode}")
+        print(f"resumed {checkpoint_path} stage={args.stage} step={start_step} episode={episode}")
+    elif init_from_path is not None:
+        load_weights_from_checkpoint(init_from_path, agent, device)
+        agent.sync_target()
+        print(f"initialized stage={args.stage} from {init_from_path}; starting new training")
     else:
-        print("no checkpoint found; starting new training")
+        print(f"no checkpoint found for stage={args.stage}; starting new training")
 
     # 이번 실행이 끝날 step 번호다.
     # 예: 저장 파일이 step=1,000,000이면 end_step=2,000,000이 된다.
@@ -167,6 +216,7 @@ def main():
     state = env.reset()
     episode_reward = 0.0
     episode_raw_reward = 0.0
+    episode_length = 0
 
     for step in range(start_step + 1, end_step + 1):
         # 지금 step에 맞는 탐험 확률을 계산한다.
@@ -186,20 +236,28 @@ def main():
         state = next_state
         episode_reward += reward
         episode_raw_reward += float(info.get("raw_reward", reward))
+        episode_length += 1
 
         if done:
+            stage_clear = bool(info.get("flag_get", False))
+            dead = int(info.get("life", 0)) < 2 and not stage_clear
+
             # 한 판이 끝나면 이번 판 점수와 최대 이동 거리 같은 값을 기록한다.
             writer.add_scalar("episode/reward", episode_reward, episode)
             writer.add_scalar("episode/raw_reward", episode_raw_reward, episode)
             writer.add_scalar("episode/x_pos", info.get("x_pos", 0), episode)
             writer.add_scalar("episode/flag_get", int(info.get("flag_get", False)), episode)
             writer.add_scalar("episode/life", info.get("life", 0), episode)
+            writer.add_scalar("episode/length", episode_length, episode)
+            writer.add_scalar("episode/death", int(dead), episode)
+            writer.add_scalar("episode/stage_clear", int(stage_clear), episode)
 
             # 새 게임을 시작한다.
             state = env.reset()
             episode += 1
             episode_reward = 0.0
             episode_raw_reward = 0.0
+            episode_length = 0
 
         if len(replay) >= learning_starts and step % train_every == 0:
             # 기억장이 충분히 찼고, 학습할 차례면 batch를 뽑는다.
@@ -217,12 +275,12 @@ def main():
 
         if step % checkpoint_every == 0:
             # 최신 모델 저장. monitor.py가 이 파일로 화면을 보여준다.
-            save_checkpoint(LATEST_PATH, agent, optimizer, step, episode)
+            save_checkpoint(checkpoint_path, agent, optimizer, step, episode)
             writer.add_scalar("train/epsilon", epsilon, step)
-            print(f"saved {LATEST_PATH} step={step} episode={episode} epsilon={epsilon:.3f}")
+            print(f"saved {checkpoint_path} stage={args.stage} step={step} episode={episode} epsilon={epsilon:.3f}")
 
     # 학습이 끝났을 때 마지막 상태도 저장한다.
-    save_checkpoint(LATEST_PATH, agent, optimizer, end_step, episode)
+    save_checkpoint(checkpoint_path, agent, optimizer, end_step, episode)
 
     # 게임과 TensorBoard writer를 정리한다.
     env.close()

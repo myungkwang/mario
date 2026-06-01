@@ -60,13 +60,25 @@ python train.py
 - TensorBoard 로그: `runs/mario_dqn`
 - replay buffer는 checkpoint에 저장하지 않으므로 재시작 후 초반 10,000 step은 새 경험을 다시 모읍니다.
 
+### 1-1 checkpoint로 1-2 학습 시작
+
+1-1을 충분히 학습한 뒤, 그 두뇌 가중치를 1-2의 시작점으로 사용할 수 있습니다.
+
+```bash
+python train.py --stage 1-2 --init-from checkpoints/latest.pt
+```
+
+- 1-2 checkpoint 위치: `checkpoints/1-2_latest.pt`
+- 1-2 TensorBoard 로그: `runs/mario_dqn_1-2`
+- `checkpoints/1-2_latest.pt`가 이미 있으면 `--init-from`보다 1-2 checkpoint를 우선 불러와 이어서 학습합니다.
+
 ## 학습 로그 확인
 
 ```bash
 tensorboard --logdir runs
 ```
 
-브라우저에서 TensorBoard 주소를 열면 episode reward, raw reward, x position, loss, epsilon 값을 확인할 수 있습니다.
+브라우저에서 TensorBoard 주소를 열면 episode reward, raw reward, x position, episode length, death, stage clear, loss, epsilon 값을 확인할 수 있습니다.
 
 ## 학습 모델 화면 확인
 
@@ -80,7 +92,14 @@ python monitor.py
 python monitor.py --checkpoint checkpoints/latest.pt --fps 60 --epsilon 0.0
 ```
 
+- 1-2 보기:
+
+```bash
+python monitor.py --stage 1-2 --fps 60 --epsilon 0.0
+```
+
 - `--checkpoint`: 불러올 checkpoint 경로
+- `--stage`: 실행할 Mario 스테이지. 기본값은 `1-1`
 - `--fps`: 화면 렌더링 최대 FPS
 - `--epsilon`: 관찰 중 랜덤 행동 확률. `0.0`이면 학습된 정책 그대로 실행합니다.
 

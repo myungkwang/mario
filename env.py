@@ -137,17 +137,16 @@ class MarioPreprocessWrapper(gym.Wrapper):
         return torch.from_numpy(np.stack(self.frames, axis=0))
 
 
-def make_env(render_mode: str | None = None):
+def make_env(render_mode: str | None = None, stage: str = "1-1"):
     """
-    1-1 Mario 환경 생성.
+    선택한 Mario 스테이지 환경 생성.
 
     처음부터 모든 버튼을 쓰게 하면 경우의 수가 너무 많아 배움이 느리다.
     그래서 처음 학습은 오른쪽 위주 행동만 있는 RIGHT_ONLY로 작게 시작한다.
     """
 
-    # SuperMarioBros-1-1-v0는 1-1 스테이지 하나만 연습하는 환경이다.
-    # 엔딩 목표 전에 1-1을 먼저 배우는 것이 훨씬 쉽다.
-    env = gym_super_mario_bros.make("SuperMarioBros-1-1-v0")
+    # SuperMarioBros-1-1-v0, SuperMarioBros-1-2-v0처럼 스테이지 하나를 골라 연습한다.
+    env = gym_super_mario_bros.make(f"SuperMarioBros-{stage}-v0")
 
     # JoypadSpace는 복잡한 버튼 조합을 몇 개 행동으로 줄여준다.
     # RIGHT_ONLY에는 오른쪽 이동, 오른쪽 점프 같은 초보 학습용 행동만 있다.

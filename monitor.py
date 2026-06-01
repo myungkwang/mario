@@ -12,9 +12,16 @@ from env import make_env
 CHECKPOINT_PATH = Path("checkpoints/latest.pt")
 
 
+def default_checkpoint_path(stage: str) -> Path:
+    if stage == "1-1":
+        return CHECKPOINT_PATH
+    return Path("checkpoints") / f"{stage}_latest.pt"
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Watch the trained Mario DQN play.")
-    parser.add_argument("--checkpoint", default=str(CHECKPOINT_PATH))
+    parser.add_argument("--stage", default="1-1", help="Mario stage to watch, e.g. 1-1 or 1-2")
+    parser.add_argument("--checkpoint", default=None)
     parser.add_argument("--fps", type=int, default=60, help="Maximum render FPS")
     parser.add_argument(
         "--epsilon",
@@ -89,11 +96,11 @@ def main(argv=None):
 
     # 화면을 볼 목적이므로 render_mode="human"이라는 의도를 적어 둔다.
     # 실제 구형 gym-super-mario-bros는 env.render()로 창을 띄운다.
-    env = make_env(render_mode="human")
+    env = make_env(render_mode="human", stage=args.stage)
 
-    checkpoint_path = Path(args.checkpoint)
+    checkpoint_path = Path(args.checkpoint) if args.checkpoint else default_checkpoint_path(args.stage)
 
-    print(f"monitor waiting for {checkpoint_path} fps={args.fps} epsilon={args.epsilon}")
+    print(f"monitor waiting for {checkpoint_path} stage={args.stage} fps={args.fps} epsilon={args.epsilon}")
 
     while True:
         # 학습이 아직 checkpoint를 저장하지 않았으면 기다린다.
