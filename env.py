@@ -6,7 +6,7 @@ import gym_super_mario_bros
 import numpy as np
 import torch
 from gym import spaces
-from gym_super_mario_bros.actions import RIGHT_ONLY
+from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
 from nes_py.wrappers import JoypadSpace
 
 
@@ -19,7 +19,7 @@ class MarioPreprocessWrapper(gym.Wrapper):
     그래서 화면을 작게 만들고, 흑백으로 바꾸고, 최근 4장을 묶는다.
     """
 
-    def __init__(self, env, frame_stack: int = 4, frame_skip: int = 4):
+    def __init__(self, env, frame_stack: int = 4, frame_skip: int = 4, episodic_life: bool = True):
         # gym.Wrapper는 기존 env를 감싸서 행동/화면을 바꿔주는 포장지다.
         # 원래 Mario env는 그대로 두고, 관찰값만 DQN용으로 바꾼다.
         super().__init__(env)
@@ -30,6 +30,12 @@ class MarioPreprocessWrapper(gym.Wrapper):
         self.frame_skip = frame_skip
         self.last_x_pos = 0
         self.last_life = 2
+
+        # episodic_life=True면 목숨이 줄 때마다(죽을 때마다) 학습상 done=True로 본다.
+        # 그러면 학습 루프가 바로 reset하므로, 죽음 애니메이션 동안의 쓸모없는 화면을
+        # 에이전트가 보지 않고, 죽음 벌점도 제대로 terminal 신호로 들어간다.
+        # monitor처럼 죽어도 남은 목숨으로 계속 이어보고 싶을 때는 False로 끈다.
+        self.episodic_life = episodic_life
 
         # deque는 오래된 화면을 자동으로 밀어내는 줄이다.
         # maxlen=4이면 새 화면이 들어올 때 가장 오래된 화면이 빠진다.
@@ -86,11 +92,20 @@ class MarioPreprocessWrapper(gym.Wrapper):
             if done:
                 break
 
+        # _shape_reward가 self.last_life를 갱신하기 전에 죽음 여부를 잡아둔다.
+        prev_life = self.last_life
         shaped_reward = self._shape_reward(total_raw_reward, info, done)
+        life_lost = int(info.get("life", prev_life)) < prev_life
 
         if obs is not None:
             # 새 화면도 똑같이 작고 흑백인 frame으로 바꿔서 frames에 넣는다.
             self.frames.append(self._preprocess(obs))
+
+        # episodic_life: 죽으면(목숨 감소) 남은 목숨이 있어도 학습상 done=True로 본다.
+        # 학습 루프가 곧바로 reset → 깨끗한 (랜덤) 스테이지 시작.
+        # 덕분에 죽음 애니메이션 화면을 에이전트가 보지 않고, 죽음 벌점이 terminal로 정확히 들어간다.
+        if self.episodic_life and life_lost:
+            done = True
 
         # DQN 학습 루프가 쓰기 쉬운 형태로 돌려준다.
         # state, reward, done, info는 강화학습의 기본 네 가지 정보다.
@@ -100,19 +115,26 @@ class MarioPreprocessWrapper(gym.Wrapper):
         return self._get_state(), shaped_reward, bool(done), info
 
     def _shape_reward(self, raw_reward: float, info: dict, done: bool) -> float:
+        # gym_super_mario_bros raw_reward는 이미 전진속도 보상 + 시계 패널티를 담고 있다.
+        # 그래서 전진을 또 보상하지 않고(이중보상 제거), 정지 벌점도 두지 않는다.
+        # 정지 벌점이 있으면 피라냐 파이프 앞에서 "잠깐 기다리기"를 못 배워 돌진하다 죽는다.
         x_pos = int(info.get("x_pos", self.last_x_pos))
         life = int(info.get("life", self.last_life))
         flag_get = bool(info.get("flag_get", False))
 
-        progress = max(0, x_pos - self.last_x_pos)
-        reward = raw_reward + progress * 0.1
+        # raw_reward는 env step당 대략 [-15, 15]. /10으로 줄여 목표 Q값을 작게 유지한다.
+        # 이래야 깃발/죽음 보너스가 묻히지 않고 학습이 안정적이다.
+        reward = raw_reward / 10.0
 
-        if progress == 0:
-            reward -= 0.2
-        if done and life < self.last_life and not flag_get:
-            reward -= 50.0
         if flag_get:
-            reward += 1000.0
+            # 클리어 보너스. 1000은 너무 커서 Q값을 흔들었다 -> 다른 보상과 자릿수를 맞춘다.
+            reward += 50.0
+        elif life < self.last_life:
+            # 목숨이 줄면 죽은 것. done 여부와 무관하게 벌점을 준다.
+            # 전체 게임(SuperMarioBros-v0)은 목숨이 남으면 죽어도 에피소드가 안 끝나므로,
+            # done만 보면 중간 죽음을 놓친다. 적별 보상 손코딩 없이도 에이전트는
+            # "죽으면 손해"를 배워 모든 월드에서 회피(후진/점프)를 학습한다.
+            reward -= 15.0
 
         self.last_x_pos = max(self.last_x_pos, x_pos)
         self.last_life = life
@@ -137,23 +159,45 @@ class MarioPreprocessWrapper(gym.Wrapper):
         return torch.from_numpy(np.stack(self.frames, axis=0))
 
 
-def make_env(render_mode: str | None = None, stage: str = "1-1"):
+def make_env(render_mode: str | None = None, stage: str = "1-1", episodic_life: bool = True):
     """
     선택한 Mario 스테이지 환경 생성.
 
-    처음부터 모든 버튼을 쓰게 하면 경우의 수가 너무 많아 배움이 느리다.
-    그래서 처음 학습은 오른쪽 위주 행동만 있는 RIGHT_ONLY로 작게 시작한다.
+    COMPLEX_MOVEMENT로 행동을 12개 쓴다.
+    left(후진)·left+A(뒤로 점프)로 적을 피하고, A(점프)로 뛰어넘고,
+    무엇보다 down으로 파이프 안에 들어갈 수 있다.
+    전체 게임은 파이프로 내려가야 완료되는 스테이지가 있어 down이 필수다.
+
+    stage="all"이면 SuperMarioBros-v0(전체 게임) env를 만든다.
+    이 env는 1-1부터 시작해 깃발을 닿으면 자동으로 다음 스테이지로 넘어가고,
+    목숨을 다 잃거나 게임을 클리어할 때까지 한 에피소드로 이어진다.
+    하나의 모델로 1-1~8-8을 연속 플레이/학습하려면 이걸 쓴다.
+
+    stage="random"이면 SuperMarioBrosRandomStages-v0 env를 만든다.
+    매 reset마다 랜덤 스테이지에서 시작해 전 스테이지를 골고루 학습한다.
+    "all"은 항상 1-1부터라 후반 스테이지는 거의 못 가서 학습이 안 된다.
+    그래서 학습은 "random"으로 골고루, 연속 플레이 감상은 "all"로 보는 게 좋다.
     """
 
-    # SuperMarioBros-1-1-v0, SuperMarioBros-1-2-v0처럼 스테이지 하나를 골라 연습한다.
-    env = gym_super_mario_bros.make(f"SuperMarioBros-{stage}-v0")
+    if stage in ("all", "full", "fullgame"):
+        # 스테이지 suffix 없는 id = 전체 게임. 스테이지가 자동으로 이어진다.
+        env = gym_super_mario_bros.make("SuperMarioBros-v0")
+    elif stage in ("random", "rand"):
+        # 매 reset마다 랜덤 스테이지. 전 스테이지 균등 노출로 후반도 학습된다.
+        env = gym_super_mario_bros.make("SuperMarioBrosRandomStages-v0")
+    else:
+        # SuperMarioBros-1-1-v0, SuperMarioBros-1-2-v0처럼 스테이지 하나만 연습한다.
+        env = gym_super_mario_bros.make(f"SuperMarioBros-{stage}-v0")
 
     # JoypadSpace는 복잡한 버튼 조합을 몇 개 행동으로 줄여준다.
-    # RIGHT_ONLY에는 오른쪽 이동, 오른쪽 점프 같은 초보 학습용 행동만 있다.
-    env = JoypadSpace(env, RIGHT_ONLY)
+    # COMPLEX_MOVEMENT(12개): NOOP, right, right+A, right+B, right+A+B,
+    #   A(점프), left, left+A, left+B, left+A+B, down(파이프 진입), up.
+    env = JoypadSpace(env, COMPLEX_MOVEMENT)
 
     # render_mode 인자는 monitor.py에서 의도를 드러내기 위한 자리다.
     # 이 라이브러리는 구형 gym API라 생성자 render_mode를 지원하지 않는다.
     _ = render_mode
 
-    return MarioPreprocessWrapper(env)
+    # 학습은 episodic_life=True(죽을 때마다 깔끔히 reset), monitor는 False로 호출해
+    # 죽어도 남은 목숨으로 1-1~8-8 연속 플레이를 이어서 본다.
+    return MarioPreprocessWrapper(env, episodic_life=episodic_life)

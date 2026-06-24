@@ -58,7 +58,7 @@ def play_once(agent: DQNAgent, env, fps: int, epsilon: float = 0.0) -> float:
     state = env.reset()
     done = False
     total_reward = 0.0
-    frame_delay = 0.8 / fps
+    frame_delay = 1.5 / fps
 
     while not done:
         started = time.perf_counter()
@@ -96,7 +96,8 @@ def main(argv=None):
 
     # 화면을 볼 목적이므로 render_mode="human"이라는 의도를 적어 둔다.
     # 실제 구형 gym-super-mario-bros는 env.render()로 창을 띄운다.
-    env = make_env(render_mode="human", stage=args.stage)
+    # episodic_life=False: 죽어도 에피소드를 끝내지 않고 남은 목숨으로 계속 이어본다.
+    env = make_env(render_mode="human", stage=args.stage, episodic_life=False)
 
     checkpoint_path = Path(args.checkpoint) if args.checkpoint else default_checkpoint_path(args.stage)
 

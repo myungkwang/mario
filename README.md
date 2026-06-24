@@ -6,7 +6,7 @@
 ## 주요 기능
 
 - `SuperMarioBros-1-1-v0` 환경 학습
-- `RIGHT_ONLY` 행동 공간 사용
+- `COMPLEX_MOVEMENT` 행동 공간 사용 (left/점프/down 포함, 적 회피·파이프 진입 가능)
 - 프레임 스킵, 프레임 스택, 보상 shaping 적용
 - replay buffer 기반 DQN 학습
 - `checkpoints/latest.pt` 자동 저장 및 이어서 학습

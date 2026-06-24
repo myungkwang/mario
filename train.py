@@ -143,7 +143,7 @@ def main(argv=None):
     env = make_env(stage=args.stage)
 
     # 환경이 가진 행동 개수를 읽는다.
-    # RIGHT_ONLY면 보통 5개 행동이 있다.
+    # COMPLEX_MOVEMENT면 12개 행동이 있다.
     num_actions = env.action_space.n
 
     # online_net은 학습으로 계속 바뀌는 현재 두뇌다.
@@ -171,7 +171,7 @@ def main(argv=None):
     # 예전에는 total_steps가 "처음부터 끝까지 100만 step"이라는 뜻이었다.
     # 이제는 이어서 학습할 수 있으므로, python train.py를 실행할 때마다
     # 현재 저장된 위치에서 100만 step을 더 공부한다.
-    additional_steps = 1_000_000
+    additional_steps = 2_000_000
 
     # 처음 1만 step은 기억장 채우기 시간이다.
     # 경험이 너무 적을 때 바로 학습하면 같은 장면만 보고 배워서 불안정하다.

@@ -22,14 +22,14 @@ class DQNAgent:
         gamma: float = 0.99,
     ):
         # online_net은 매번 학습으로 바뀌는 "현재 두뇌"다.
-        # GPU가 있으면 .to(device)로 GPU에 올려 계산을 빠르게 한다.
+        # GPU가 있으면 .to(device)로 GPU에 올.려 계산을 빠르게 한다.
         self.online_net = online_net.to(device)
 
         # target_net은 정답을 계산할 때 쓰는 "천천히 바뀌는 두뇌"다.
         # DQN은 정답도 AI가 만들기 때문에, 정답 만드는 두뇌가 너무 빨리 바뀌면 흔들린다.
         self.target_net = target_net.to(device)
 
-        # 행동 개수. RIGHT_ONLY 환경에서는 보통 5개다.
+        # 행동 개수. COMPLEX_MOVEMENT 환경에서는 12개다.
         self.num_actions = num_actions
 
         # device는 "CPU에서 계산할지, GPU에서 계산할지"를 담는 값이다.

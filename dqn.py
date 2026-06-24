@@ -55,7 +55,7 @@ class DQN(nn.Module):
             nn.ReLU(),
 
             # 마지막 출력 개수는 행동 개수와 같아야 한다.
-            # RIGHT_ONLY는 행동이 5개라면 Q값도 5개가 나온다.
+            # COMPLEX_MOVEMENT는 행동이 12개라서 Q값도 12개가 나온다.
             nn.Linear(512, num_actions),
         )
 
